@@ -1,0 +1,16 @@
+streamlit
+opencv-python-headless
+tensorflow-cpu
+scikit-learn
+pandas
+requests
+python-dotenv
+imageio
+imageio-ffmpeg
+gdown
+plotly
+Pillow
+matplotlib
+ultralytics
+numpy
+streamlink
