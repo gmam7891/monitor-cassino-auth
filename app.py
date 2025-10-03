@@ -1,21 +1,17 @@
+# ===================== IMPORTS BÁSICOS =====================
 import os
 from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
 
+# Config da página deve ser a PRIMEIRA chamada do Streamlit
+st.set_page_config(page_title="Monitor Cassino PP", layout="wide")
+
 # Lista global de jogos de interesse utilizados no filtro semanal. Modifique conforme necessário.
 JOGOS_INTERESSE = ['pragmatic', 'Slots', 'Virtual Casino']
 
-# A função de carregamento semanal foi definida mais abaixo usando a pasta `dados_semanais`. Caso
-# deseje um comportamento diferente (por exemplo, carregar de outro local), adapte apenas uma
-# única função em vez de duplicar definições. Esta definição inicial foi removida para evitar
-# sobreposição de funções e confusão no carregamento de dados.
-
-# O carregamento de dados semanais é feito quando necessário, após a definição da função
-# correspondente. Chamadas prematuras aqui poderiam resultar em NameError.
-
+# ---------------- imports adicionais ----------------
 from datetime import date
-import streamlit as st
 import pandas as pd
 import datetime
 import logging
@@ -26,13 +22,7 @@ load_dotenv()
 import threading
 import time
 
-# As chaves da Twitch são sensíveis; não as exponha no log. Se necessário para
-# depuração local, descomente as linhas abaixo.
-# print("TWITCH_CLIENT_ID:", os.getenv("TWITCH_CLIENT_ID"))
-# print("TWITCH_CLIENT_SECRET:", os.getenv("TWITCH_CLIENT_SECRET"))
-
 import tensorflow as tf
-import time
 import re
 import gdown
 import subprocess
@@ -42,7 +32,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from cluster_processor import carregar_dados_simulados, clusterizar_streamers
 from cluster_dashboard import exibir_dashboard_cluster
 
-
 from ml_utils import (
     prever_jogo_em_frame,
     obter_url_m3u8_twitch,
@@ -51,9 +40,19 @@ from ml_utils import (
     analisar_por_periodo  # <- adicionar isso aqui
 )
 
-# ====== BLOCO DE LOGIN (COLE NO TOPO, APÓS OS IMPORTS) ======
-import streamlit as st
+# ===================== LOGIN OBRIGATÓRIO =====================
 import streamlit_authenticator as stauth
+
+def _credentials_from_secrets() -> dict:
+    """Converte st.secrets['credentials'] em um dict mutável no formato esperado."""
+    src = st.secrets["credentials"]
+    users = {}
+    for username in src["usernames"].keys():
+        users[username] = {
+            "name": src["usernames"][username]["name"],
+            "password": src["usernames"][username]["password"],
+        }
+    return {"usernames": users}
 
 def require_login():
     # Verifica se os segredos existem
@@ -61,14 +60,15 @@ def require_login():
         st.error("⚠️ Credenciais não configuradas. Crie .streamlit/secrets.toml ou defina em Secrets do deploy.")
         st.stop()
 
-    credentials = st.secrets["credentials"]
+    # Usa cópia mutável para evitar TypeError (st.secrets é read-only)
+    credentials = _credentials_from_secrets()
     cookie = st.secrets["cookie"]
 
     authenticator = stauth.Authenticate(
         credentials,
         cookie["name"],
         cookie["key"],
-        cookie.get("expiry_days", 30),
+        int(cookie.get("expiry_days", 30)),
     )
 
     name, auth_status, username = authenticator.login("Login", "main")
@@ -84,137 +84,11 @@ def require_login():
         st.info("Por favor, faça login para acessar o conteúdo.")
         st.stop()
 
-# Chama o login ANTES de qualquer UI
-USER = require_login()
-# ====== FIM DO BLOCO DE LOGIN ======
-
+# 🔒 Trava tudo atrás do login (NÃO duplique esta linha)
 USER = require_login()
 
-st.markdown("""
-<div style='background-color:white; padding:10px; display:flex; align-items:center;'>
-    <h1 style='color:black; margin:0;'>CASINO MONITOR</h1>
-</div>
-""", unsafe_allow_html=True)
-
-# aqui continua o seu app normal (dashboards, análises, etc.)
-
-
-def salvar_deteccao_local_brasilia(tipo, resultados):
-    """
-    Versão legada de salvar_deteccao que adiciona uma coluna de horário de Brasília e salva
-    diretamente em um arquivo CSV com nome prefixado por 'resultados_'. Esta função não
-    é utilizada no fluxo principal do aplicativo, mas é mantida por compatibilidade.
-    """
-    try:
-        df = pd.DataFrame(resultados)
-        if 'hora_inferencia_brasilia' not in df.columns:
-            df['hora_inferencia_brasilia'] = (datetime.utcnow() - timedelta(hours=3)).strftime('%Y-%m-%d %H:%M:%S')
-        output_file = f"resultados_{tipo}.csv"
-        df.to_csv(output_file, index=False)
-        print(f"✅ Resultados salvos no arquivo: {output_file}")
-    except Exception as e:
-        print(f"❌ Erro ao salvar detecção: {e}")
-
-# ---------------- OBTER ACCESS TOKEN DA TWITCH ----------------
-def obter_access_token(client_id, client_secret):
-    url = "https://id.twitch.tv/oauth2/token"
-    data = {
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "grant_type": "client_credentials"
-    }
-    try:
-        resp = requests.post(url, data=data)
-        resp.raise_for_status()
-        return resp.json().get("access_token")
-    except Exception as e:
-        st.error("Erro ao obter access_token:")
-        st.code(str(e))
-        st.stop()
-
-# ---------------- OpenCV em ambiente headless ----------------
-try:
-    import cv2
-except ImportError:
-    import subprocess
-    try:
-        subprocess.check_call(["pip", "install", "opencv-python-headless"])
-        import cv2
-    except Exception as e:
-        st.error(f"❌ Falha ao instalar OpenCV automaticamente: {e}")
-        st.stop()
-
-def varredura_automatica():
-    while True:
-        print(f"🔄 Iniciando varredura automática: {datetime.now()}")
-
-        # 1. Verificar lives dos streamers cadastrados
-        resultados_lives = []
-        for streamer in TODOS_STREAMERS:
-            res = verificar_jogo_em_live(streamer, HEADERS_TWITCH, BASE_URL_TWITCH)
-            if res and len(res) == 3:
-                jogo, categoria, viewers = res
-                resultados_lives.append({
-                    "streamer": streamer,
-                    "jogo_detectado": jogo,
-                    "categoria": categoria,
-                    "viewers": viewers,
-                    "data_hora": datetime.now()
-                })
-
-        if resultados_lives:
-            salvar_deteccao("lives_auto", resultados_lives)
-            print(f"✅ {len(resultados_lives)} lives automáticas detectadas e salvas.")
-
-        else:
-            print("ℹ️ Nenhuma live detectada.")
-
-        # 2. Atualizar dados semanais com base nos históricos
-        df1 = carregar_historico("lives")
-        df2 = carregar_historico("template")
-        df3 = carregar_historico("url")
-        df = pd.concat([df1, df2, df3], ignore_index=True)
-
-        ano, semana, _ = date.today().isocalendar()
-        os.makedirs("dados_semanais", exist_ok=True)
-        df.to_csv(f"dados_semanais/semana_{ano}-{semana}.csv", index=False)
-
-        # Clusterização automática semanal (se houver dados suficientes)
-        try:
-            if df.shape[0] > 1000:
-                print(f"🧠 Rodando clusterização automática... ({df.shape[0]} linhas)")
-                perfil, resumo = clusterizar_streamers(df)
-                # Salva os resultados do cluster, se quiser
-                perfil.to_csv(f"dados_semanais/perfil_cluster_semana_{ano}-{semana}.csv", index=False)
-                resumo.to_csv(f"dados_semanais/resumo_cluster_semana_{ano}-{semana}.csv", index=False)
-                print("✅ Clusterização semanal concluída e salva.")
-            else:
-                print(f"ℹ️ Clusterização não executada (apenas {df.shape[0]} linhas).")
-        except Exception as e:
-            print(f"❌ Erro na clusterização automática: {e}")
-
-        print(f"📁 Varredura automática concluída em {datetime.now()} — CSV semanal atualizado.")
-        time.sleep(900)  # espera 15 minutos
-
-
-# ---------------- Importar módulos internos ----------------
-from ml_training import treinar_modelo
-from ml_utils import (
-    match_template_from_image,
-    capturar_frame_ffmpeg_imageio,
-    prever_jogo_em_frame,
-    verificar_jogo_em_live,
-    varrer_url_customizada,
-    varrer_vods_com_modelo,
-    buscar_vods_twitch_por_periodo,
-    buscar_vods_por_streamer_e_periodo
-)
-
-# ---------------- CONFIGURAÇÃO GERAL ----------------
-st.set_page_config(page_title="Monitor Cassino PP", layout="wide")
+# ===================== CABEÇALHO =====================
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(asctime)s - %(message)s')
-
-# ---------------- CABEÇALHO ----------------
 st.markdown("""
 <div style='background-color:white; padding:10px; display:flex; align-items:center;'>
     <h1 style='color:black; margin:0;'>CASINO MONITOR</h1>
