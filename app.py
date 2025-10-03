@@ -51,6 +51,44 @@ from ml_utils import (
     analisar_por_periodo  # <- adicionar isso aqui
 )
 
+# ====== BLOCO DE LOGIN (COLE NO TOPO, APÓS OS IMPORTS) ======
+import streamlit as st
+import streamlit_authenticator as stauth
+
+def require_login():
+    # Verifica se os segredos existem
+    if "credentials" not in st.secrets or "cookie" not in st.secrets:
+        st.error("⚠️ Credenciais não configuradas. Crie .streamlit/secrets.toml ou defina em Secrets do deploy.")
+        st.stop()
+
+    credentials = st.secrets["credentials"]
+    cookie = st.secrets["cookie"]
+
+    authenticator = stauth.Authenticate(
+        credentials,
+        cookie["name"],
+        cookie["key"],
+        cookie.get("expiry_days", 30),
+    )
+
+    name, auth_status, username = authenticator.login("Login", "main")
+
+    if auth_status:
+        st.sidebar.success(f"Bem-vindo(a), {name}")
+        authenticator.logout("Sair", "sidebar")
+        return username
+    elif auth_status is False:
+        st.error("Usuário ou senha incorretos.")
+        st.stop()
+    else:
+        st.info("Por favor, faça login para acessar o conteúdo.")
+        st.stop()
+
+# Chama o login ANTES de qualquer UI
+USER = require_login()
+# ====== FIM DO BLOCO DE LOGIN ======
+
+
 def salvar_deteccao_local_brasilia(tipo, resultados):
     """
     Versão legada de salvar_deteccao que adiciona uma coluna de horário de Brasília e salva
