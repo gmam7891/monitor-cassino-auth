@@ -14,5 +14,5 @@ matplotlib
 ultralytics
 numpy
 streamlink
-streamlit-authenticator
+streamlit-authenticator==0.3.2
 bcrypt
