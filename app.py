@@ -71,7 +71,18 @@ def require_login():
         int(cookie.get("expiry_days", 30)),
     )
 
-    name, auth_status, username = authenticator.login("Login", "main")
+    try:
+        # Versões 0.3.x (aceitam: title, location)
+        name, auth_status, username = authenticator.login("Login", "main")
+    except TypeError:
+        # Versões 0.4.x+ (mudaram a assinatura; use location como keyword)
+        name, auth_status, username = authenticator.login(location="main")
+    except ValueError as e:
+        # Alguns builds reclamam do 1º argumento; força keyword
+        if "Location must be one of" in str(e):
+            name, auth_status, username = authenticator.login(location="main")
+        else:
+            raise
 
     if auth_status:
         st.sidebar.success(f"Bem-vindo(a), {name}")
