@@ -88,6 +88,16 @@ def require_login():
 USER = require_login()
 # ====== FIM DO BLOCO DE LOGIN ======
 
+USER = require_login()
+
+st.markdown("""
+<div style='background-color:white; padding:10px; display:flex; align-items:center;'>
+    <h1 style='color:black; margin:0;'>CASINO MONITOR</h1>
+</div>
+""", unsafe_allow_html=True)
+
+# aqui continua o seu app normal (dashboards, análises, etc.)
+
 
 def salvar_deteccao_local_brasilia(tipo, resultados):
     """
