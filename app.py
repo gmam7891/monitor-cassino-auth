@@ -55,13 +55,11 @@ def _credentials_from_secrets() -> dict:
     return {"usernames": users}
 
 def require_login():
-    # Verifica se os segredos existem
     if "credentials" not in st.secrets or "cookie" not in st.secrets:
-        st.error("⚠️ Credenciais não configuradas. Crie .streamlit/secrets.toml ou defina em Secrets do deploy.")
+        st.error("⚠️ Credenciais não configuradas. Defina .streamlit/secrets.toml ou Secrets no deploy.")
         st.stop()
 
-    # Usa cópia mutável para evitar TypeError (st.secrets é read-only)
-    credentials = _credentials_from_secrets()
+    credentials = _credentials_from_secrets()  # sua função que copia de st.secrets -> dict mutável
     cookie = st.secrets["cookie"]
 
     authenticator = stauth.Authenticate(
@@ -71,22 +69,25 @@ def require_login():
         int(cookie.get("expiry_days", 30)),
     )
 
+    # ✅ Compatível com 0.3.x e 0.4.x+
     try:
-        # Versões 0.3.x (aceitam: title, location)
+        # API nova (0.3.1+): usa location e fields
+        name, auth_status, username = authenticator.login(
+            location="main",
+            fields={"Form name": "Login"}  # opcional
+        )
+    except (TypeError, ValueError):
+        # Fallback para API antiga: ('Login', 'main')
         name, auth_status, username = authenticator.login("Login", "main")
-    except TypeError:
-        # Versões 0.4.x+ (mudaram a assinatura; use location como keyword)
-        name, auth_status, username = authenticator.login(location="main")
-    except ValueError as e:
-        # Alguns builds reclamam do 1º argumento; força keyword
-        if "Location must be one of" in str(e):
-            name, auth_status, username = authenticator.login(location="main")
-        else:
-            raise
 
     if auth_status:
         st.sidebar.success(f"Bem-vindo(a), {name}")
-        authenticator.logout("Sair", "sidebar")
+        try:
+            # API nova (0.3.1+)
+            authenticator.logout(location="sidebar")
+        except (TypeError, ValueError):
+            # API antiga
+            authenticator.logout("Sair", "sidebar")
         return username
     elif auth_status is False:
         st.error("Usuário ou senha incorretos.")
